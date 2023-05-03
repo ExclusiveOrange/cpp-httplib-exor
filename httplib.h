@@ -479,6 +479,7 @@ struct Request {
 
   bool has_header(const std::string &key) const;
   std::string get_header_value(const std::string &key, size_t id = 0) const;
+  const char * get_header_value_cstr(const std::string &key, size_t id = 0) const;
   template <typename T>
   T get_header_value(const std::string &key, size_t id = 0) const;
   size_t get_header_value_count(const std::string &key) const;
@@ -4839,8 +4840,11 @@ inline bool Request::has_header(const std::string &key) const {
   return detail::has_header(headers, key);
 }
 
-inline std::string Request::get_header_value(const std::string &key,
-                                             size_t id) const {
+inline std::string Request::get_header_value(const std::string &key, size_t id) const {
+  return detail::get_header_value(headers, key, id, "");
+}
+
+inline const char * Request::get_header_value_cstr(const std::string &key, size_t id) const {
   return detail::get_header_value(headers, key, id, "");
 }
 
