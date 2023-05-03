@@ -2049,12 +2049,15 @@ inline size_t to_utf8(int code, char *buff) {
 
 // NOTE: This code came up with the following stackoverflow post:
 // https://stackoverflow.com/questions/180947/base64-decode-snippet-in-c
-inline std::string base64_encode(const std::string &in) {
-  static const auto lookup =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+inline std::string base64_encode(const std::string_view in) {
+  constexpr char lookup[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  
+  // output size padded to multiple of 4 bytes
+  const auto outLengthUnpadded = (in.size() * 4) / 3;
+  const auto outLengthPadded = (outLengthUnpadded + 3) & ~3;
 
   std::string out;
-  out.reserve(in.size());
+  out.reserve(outLengthPadded);
 
   int val = 0;
   int valb = -6;
@@ -2068,11 +2071,11 @@ inline std::string base64_encode(const std::string &in) {
     }
   }
 
-  if (valb > -6) { out.push_back(lookup[((val << 8) >> (valb + 8)) & 0x3F]); }
+  if (valb > -6)
+    out.push_back(lookup[((val << 8) >> (valb + 8)) & 0x3F]);
 
-  while (out.size() % 4) {
+  while (out.size() % 4)
     out.push_back('=');
-  }
 
   return out;
 }
