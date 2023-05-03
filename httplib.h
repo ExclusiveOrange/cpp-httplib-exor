@@ -307,14 +307,17 @@ make_unique(std::size_t n) {
   return std::unique_ptr<T>(new RT[n]);
 }
 
-struct ci {
-  bool operator()(const std::string &s1, const std::string &s2) const {
-    return std::lexicographical_compare(s1.begin(), s1.end(), s2.begin(),
-                                        s2.end(),
-                                        [](unsigned char c1, unsigned char c2) {
-                                          return ::tolower(c1) < ::tolower(c2);
-                                        });
+struct String_less {
+  using is_transparent = std::true_type;
+
+  bool
+  operator()(const std::string_view &a, const std::string_view &b) const
+  {
+    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end(), less);
   }
+
+private:
+  constexpr static bool less(unsigned char a, unsigned char b) { return ::tolower(a) < ::tolower(b); }
 };
 
 // This is based on
@@ -347,7 +350,9 @@ private:
 
 } // namespace detail
 
-using Headers = std::multimap<std::string, std::string, detail::ci>;
+// DELETE
+// using Headers = std::multimap<std::string, std::string, detail::LexicographicalCompare>;
+using Headers = std::multimap<std::string, std::string, detail::String_less>;
 
 using Params = std::multimap<std::string, std::string>;
 using Match = std::smatch;
@@ -477,11 +482,9 @@ struct Request {
   const SSL *ssl = nullptr;
 #endif
 
-  bool has_header(const std::string &key) const;
-  std::string get_header_value(const std::string &key, size_t id = 0) const;
-  const char * get_header_value_cstr(const std::string &key, size_t id = 0) const;
-  template <typename T>
-  T get_header_value(const std::string &key, size_t id = 0) const;
+  bool has_header(const std::string_view &key) const { return headers.contains(key); }
+  std::string_view get_header_value(const std::string_view key, size_t id = 0) const;
+  template <typename T> T get_header_value(const std::string_view key, size_t id = 0) const;
   size_t get_header_value_count(const std::string &key) const;
   void set_header(const std::string &key, const std::string &val);
 
@@ -699,13 +702,10 @@ public:
   Server &Delete(const std::string &pattern, HandlerWithContentReader handler);
   Server &Options(const std::string &pattern, Handler handler);
 
-  bool set_base_dir(const std::string &dir,
-                    const std::string &mount_point = std::string());
-  bool set_mount_point(const std::string &mount_point, const std::string &dir,
-                       Headers headers = Headers());
+  bool set_base_dir(const std::string &dir, const std::string &mount_point = std::string());
+  bool set_mount_point(const std::string &mount_point, const std::string &dir, Headers headers = Headers());
   bool remove_mount_point(const std::string &mount_point);
-  Server &set_file_extension_and_mimetype_mapping(const std::string &ext,
-                                                  const std::string &mime);
+  Server &set_file_extension_and_mimetype_mapping(const std::string &ext, const std::string &mime);
   Server &set_file_request_handler(Handler handler);
 
   Server &set_error_handler(HandlerWithResponse handler);
@@ -1606,39 +1606,27 @@ namespace detail {
 template <typename T, typename U>
 inline void duration_to_sec_and_usec(const T &duration, U callback) {
   auto sec = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
-  auto usec = std::chrono::duration_cast<std::chrono::microseconds>(
-                  duration - std::chrono::seconds(sec))
-                  .count();
+  auto usec = std::chrono::duration_cast<std::chrono::microseconds>(duration - std::chrono::seconds(sec)).count();
   callback(static_cast<time_t>(sec), static_cast<time_t>(usec));
 }
 
 template <typename T>
-inline T get_header_value(const Headers & /*headers*/,
-                          const std::string & /*key*/, size_t /*id*/ = 0,
-                          uint64_t /*def*/ = 0) {}
+inline T get_header_value(const Headers &headers, const std::string_view key, size_t id = 0, uint64_t = 0) {}
 
 template <>
-inline uint64_t get_header_value<uint64_t>(const Headers &headers,
-                                           const std::string &key, size_t id,
-                                           uint64_t def) {
+inline uint64_t
+get_header_value<uint64_t>(const Headers &headers, const std::string_view key, size_t id, uint64_t def)
+{
   auto rng = headers.equal_range(key);
   auto it = rng.first;
   std::advance(it, static_cast<ssize_t>(id));
-  if (it != rng.second) {
-    return std::strtoull(it->second.data(), nullptr, 10);
-  }
-  return def;
+  return it != rng.second ? std::strtoull(it->second.data(), nullptr, 10) : def;
 }
 
 } // namespace detail
 
 template <typename T>
-inline T Request::get_header_value(const std::string &key, size_t id) const {
-  return detail::get_header_value<T>(headers, key, id, 0);
-}
-
-template <typename T>
-inline T Response::get_header_value(const std::string &key, size_t id) const {
+inline T Request::get_header_value(const std::string_view key, size_t id) const {
   return detail::get_header_value<T>(headers, key, id, 0);
 }
 
@@ -1686,25 +1674,25 @@ inline void default_socket_options(socket_t sock) {
 
 template <class Rep, class Period>
 inline Server &
-Server::set_read_timeout(const std::chrono::duration<Rep, Period> &duration) {
-  detail::duration_to_sec_and_usec(
-      duration, [&](time_t sec, time_t usec) { set_read_timeout(sec, usec); });
+Server::set_read_timeout(const std::chrono::duration<Rep, Period> &duration)
+{
+  detail::duration_to_sec_and_usec(duration, [&](time_t sec, time_t usec) { set_read_timeout(sec, usec); });
   return *this;
 }
 
 template <class Rep, class Period>
 inline Server &
-Server::set_write_timeout(const std::chrono::duration<Rep, Period> &duration) {
-  detail::duration_to_sec_and_usec(
-      duration, [&](time_t sec, time_t usec) { set_write_timeout(sec, usec); });
+Server::set_write_timeout(const std::chrono::duration<Rep, Period> &duration)
+{
+  detail::duration_to_sec_and_usec(duration, [&](time_t sec, time_t usec) { set_write_timeout(sec, usec); });
   return *this;
 }
 
 template <class Rep, class Period>
 inline Server &
-Server::set_idle_interval(const std::chrono::duration<Rep, Period> &duration) {
-  detail::duration_to_sec_and_usec(
-      duration, [&](time_t sec, time_t usec) { set_idle_interval(sec, usec); });
+Server::set_idle_interval(const std::chrono::duration<Rep, Period> &duration)
+{
+  detail::duration_to_sec_and_usec(duration, [&](time_t sec, time_t usec) { set_idle_interval(sec, usec); });
   return *this;
 }
 
@@ -1738,8 +1726,9 @@ inline std::ostream &operator<<(std::ostream &os, const Error &obj) {
 }
 
 template <typename T>
-inline T Result::get_request_header_value(const std::string &key,
-                                          size_t id) const {
+inline T
+Result::get_request_header_value(const std::string &key, size_t id) const
+{
   return detail::get_header_value<T>(request_headers_, key, id, 0);
 }
 
@@ -1826,8 +1815,7 @@ socket_t create_client_socket(
     time_t read_timeout_sec, time_t read_timeout_usec, time_t write_timeout_sec,
     time_t write_timeout_usec, const std::string &intf, Error &error);
 
-const char *get_header_value(const Headers &headers, const std::string &key,
-                             size_t id = 0, const char *def = nullptr);
+std::string_view get_header_value(const Headers &headers, const std::string_view key, size_t id = 0, const std::string_view def = "");
 
 std::string params_to_query_str(const Params &params);
 
@@ -3396,18 +3384,13 @@ inline bool brotli_decompressor::decompress(const char *data,
 }
 #endif
 
-inline bool has_header(const Headers &headers, const std::string &key) {
-  return headers.find(key) != headers.end();
-}
-
-inline const char *get_header_value(const Headers &headers,
-                                    const std::string &key, size_t id,
-                                    const char *def) {
+inline const char *
+get_header_value(const Headers &headers, const std::string_view key, size_t id, const char *def)
+{
   auto rng = headers.equal_range(key);
   auto it = rng.first;
   std::advance(it, static_cast<ssize_t>(id));
-  if (it != rng.second) { return it->second.c_str(); }
-  return def;
+  return it != rng.second ? it->second.c_str() : def;
 }
 
 inline bool compare_case_ignore(const std::string &a, const std::string &b) {
@@ -3599,8 +3582,7 @@ inline bool read_content_chunked(Stream &strm, T &x,
 }
 
 inline bool is_chunked_transfer_encoding(const Headers &headers) {
-  return !strcasecmp(get_header_value(headers, "Transfer-Encoding", 0, ""),
-                     "chunked");
+  return !strcasecmp(get_header_value(headers, "Transfer-Encoding", 0, ""), "chunked");
 }
 
 template <typename T, typename U>
@@ -3608,7 +3590,8 @@ bool prepare_content_receiver(T &x, int &status,
                               ContentReceiverWithProgress receiver,
                               bool decompress, U callback) {
   if (decompress) {
-    std::string encoding = x.get_header_value("Content-Encoding");
+    // TODO: figure out how to avoid std::string here
+    std::string encoding{x.get_header_value("Content-Encoding")};
     std::unique_ptr<decompressor> decompressor;
 
     if (encoding == "gzip" || encoding == "deflate") {
@@ -3629,13 +3612,10 @@ bool prepare_content_receiver(T &x, int &status,
 
     if (decompressor) {
       if (decompressor->is_valid()) {
-        ContentReceiverWithProgress out = [&](const char *buf, size_t n,
-                                              uint64_t off, uint64_t len) {
-          return decompressor->decompress(buf, n,
-                                          [&](const char *buf2, size_t n2) {
-                                            return receiver(buf2, n2, off, len);
-                                          });
-        };
+        ContentReceiverWithProgress out =
+          [&](const char *buf, size_t n, uint64_t off, uint64_t len) {
+            return decompressor->decompress(buf, n, [&](const char *buf2, size_t n2) { return receiver(buf2, n2, off, len); });
+          };
         return callback(std::move(out));
       } else {
         status = 500;
@@ -3663,7 +3643,7 @@ bool read_content(Stream &strm, T &x, size_t payload_max_length, int &status,
 
         if (is_chunked_transfer_encoding(x.headers)) {
           ret = read_content_chunked(strm, x, out);
-        } else if (!has_header(x.headers, "Content-Length")) {
+        } else if (!x.headers.contains("Content-Length")) {
           ret = read_content_without_length(strm, out);
         } else {
           auto len = get_header_value<uint64_t>(x.headers, "Content-Length");
@@ -3954,18 +3934,16 @@ inline void parse_query_text(const std::string &s, Params &params) {
   });
 }
 
-inline bool parse_multipart_boundary(const std::string &content_type,
-                                     std::string &boundary) {
+inline bool parse_multipart_boundary(const std::string_view content_type, std::string &boundary) {
   auto boundary_keyword = "boundary=";
   auto pos = content_type.find(boundary_keyword);
-  if (pos == std::string::npos) { return false; }
+  if (pos == std::string::npos)
+    return false;
   auto end = content_type.find(';', pos);
   auto beg = pos + strlen(boundary_keyword);
   boundary = content_type.substr(beg, end - beg);
-  if (boundary.length() >= 2 && boundary.front() == '"' &&
-      boundary.back() == '"') {
+  if (boundary.length() >= 2 && boundary.front() == '"' && boundary.back() == '"')
     boundary = boundary.substr(1, boundary.size() - 2);
-  }
   return !boundary.empty();
 }
 
@@ -3975,10 +3953,10 @@ inline bool parse_range_header(const std::string &s, Ranges &ranges) {
 inline bool parse_range_header(const std::string &s, Ranges &ranges) try {
 #endif
   static auto re_first_range = std::regex(R"(bytes=(\d*-\d*(?:,\s*\d*-\d*)*))");
-  std::smatch m;
-  if (std::regex_match(s, m, re_first_range)) {
-    auto pos = static_cast<size_t>(m.position(1));
-    auto len = static_cast<size_t>(m.length(1));
+  std::smatch matches;
+  if (std::regex_match(s, matches, re_first_range)) {
+    auto pos = static_cast<size_t>(matches.position(1));
+    auto len = static_cast<size_t>(matches.length(1));
     bool all_valid_ranges = true;
     split(&s[pos], &s[pos + len], ',', [&](const char *b, const char *e) {
       if (!all_valid_ranges) return;
@@ -4836,15 +4814,9 @@ make_bearer_token_authentication_header(const std::string &token,
 }
 
 // Request implementation
-inline bool Request::has_header(const std::string &key) const {
-  return detail::has_header(headers, key);
-}
-
-inline std::string Request::get_header_value(const std::string &key, size_t id) const {
-  return detail::get_header_value(headers, key, id, "");
-}
-
-inline const char * Request::get_header_value_cstr(const std::string &key, size_t id) const {
+inline std::string_view
+Request::get_header_value(const std::string_view key, size_t id) const
+{
   return detail::get_header_value(headers, key, id, "");
 }
 
@@ -4853,8 +4825,7 @@ inline size_t Request::get_header_value_count(const std::string &key) const {
   return static_cast<size_t>(std::distance(r.first, r.second));
 }
 
-inline void Request::set_header(const std::string &key,
-                                const std::string &val) {
+inline void Request::set_header(const std::string &key, const std::string &val) {
   if (!detail::has_crlf(key) && !detail::has_crlf(val)) {
     headers.emplace(key, val);
   }
@@ -4879,8 +4850,7 @@ inline size_t Request::get_param_value_count(const std::string &key) const {
 }
 
 inline bool Request::is_multipart_form_data() const {
-  const auto &content_type = get_header_value("Content-Type");
-  return !content_type.rfind("multipart/form-data", 0);
+  return !get_header_value("Content-Type").rfind("multipart/form-data", 0);
 }
 
 inline bool Request::has_file(const std::string &key) const {
@@ -5602,8 +5572,7 @@ inline bool Server::read_content(Stream &strm, Request &req, Response &res) {
             content.append(buf, n);
             return true;
           })) {
-    const auto &content_type = req.get_header_value("Content-Type");
-    if (!content_type.find("application/x-www-form-urlencoded")) {
+    if (!req.get_header_value("Content-Type").find("application/x-www-form-urlencoded")) {
       if (req.body.size() > CPPHTTPLIB_FORM_URL_ENCODED_PAYLOAD_MAX_LENGTH) {
         res.status = 413; // NOTE: should be 414?
         return false;
@@ -5632,7 +5601,7 @@ inline bool Server::read_content_core(Stream &strm, Request &req, Response &res,
   ContentReceiverWithProgress out;
 
   if (req.is_multipart_form_data()) {
-    const auto &content_type = req.get_header_value("Content-Type");
+    const std::string_view content_type = req.get_header_value("Content-Type");
     std::string boundary;
     if (!detail::parse_multipart_boundary(content_type, boundary)) {
       res.status = 400;
@@ -6114,7 +6083,7 @@ Server::process_request(Stream &strm, bool close_connection,
   req.set_header("LOCAL_PORT", std::to_string(req.local_port));
 
   if (req.has_header("Range")) {
-    const auto &range_header_value = req.get_header_value("Range");
+    const std::string range_header_value{req.get_header_value("Range")};
     if (!detail::parse_range_header(range_header_value, req.ranges)) {
       res.status = 416;
       return write_response(strm, close_connection, req, res);
